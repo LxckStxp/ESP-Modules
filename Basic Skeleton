@@ -1,0 +1,289 @@
+-- Load GuiLib from GitHub
+local function loadScriptFromGitHub(filename)
+    local url = "https://raw.githubusercontent.com/LxckStxp/Censura/main/GuiLib/" .. filename
+    return loadstring(game:HttpGet(url))()
+end
+
+-- Initialize GuiLib
+loadScriptFromGitHub("Init.lua")
+
+-- ESP Script
+local ESP = {}
+ESP.__index = ESP
+
+function ESP.new()
+    local self = setmetatable({}, ESP)
+    self.connections = {}
+    self.espElements = {}
+    self.drawingObjects = {}
+    self.camera = workspace.CurrentCamera
+    self.localPlayer = game.Players.LocalPlayer
+    return self
+end
+
+function ESP:Start()
+    self:ConnectEvents()
+    self:AddExistingPlayers()
+    self:BeginUpdateLoop()
+end
+
+function ESP:ConnectEvents()
+    table.insert(self.connections, game.Players.PlayerAdded:Connect(function(player)
+        self:AddPlayer(player)
+    end))
+
+    table.insert(self.connections, game.Players.PlayerRemoving:Connect(function(player)
+        self:RemovePlayer(player)
+    end))
+end
+
+function ESP:AddExistingPlayers()
+    for _, player in ipairs(game.Players:GetPlayers()) do
+        if player ~= self.localPlayer then
+            self:AddPlayer(player)
+        end
+    end
+end
+
+function ESP:AddPlayer(player)
+    local elements = {
+        circle = self:CreateCircle(),
+        text = self:CreateText(),
+        lines = self:CreateLines()
+    }
+    self.espElements[player] = elements
+    self:AddToDrawingObjects(elements)
+end
+
+function ESP:CreateCircle()
+    local circle = Drawing.new("Circle")
+    circle.Thickness = 2
+    circle.Color = Color3.new(1, 0, 0)
+    circle.Transparency = 0.5
+    circle.Filled = false
+    circle.Visible = false
+    return circle
+end
+
+function ESP:CreateText()
+    local text = Drawing.new("Text")
+    text.Size = 16
+    text.Center = true
+    text.Outline = true
+    text.OutlineColor = Color3.new(0, 0, 0)
+    text.Color = Color3.new(1, 1, 1)
+    text.Visible = false
+    return text
+end
+
+function ESP:CreateLines()
+    local lines = {}
+    local bodyParts = {
+        "Head", "Neck", "UpperTorso", "LowerTorso",
+        "LeftShoulder", "LeftUpperArm", "LeftLowerArm", "LeftHand",
+        "RightShoulder", "RightUpperArm", "RightLowerArm", "RightHand",
+        "LeftHip", "LeftUpperLeg", "LeftLowerLeg", "LeftFoot",
+        "RightHip", "RightUpperLeg", "RightLowerLeg", "RightFoot"
+    }
+
+    for _, partName in ipairs(bodyParts) do
+        local line = Drawing.new("Line")
+        line.Thickness = 2
+        line.Color = Color3.new(0, 1, 0)
+        line.Visible = false
+        lines[partName] = line
+    end
+
+    return lines
+end
+
+function ESP:AddToDrawingObjects(elements)
+    table.insert(self.drawingObjects, elements.circle)
+    table.insert(self.drawingObjects, elements.text)
+    for _, line in pairs(elements.lines) do
+        table.insert(self.drawingObjects, line)
+    end
+end
+
+function ESP:RemovePlayer(player)
+    if self.espElements[player] then
+        for _, obj in pairs(self.espElements[player]) do
+            if type(obj) == "table" then
+                for _, subObj in pairs(obj) do
+                    subObj:Remove()
+                end
+            else
+                obj:Remove()
+            end
+        end
+        self.espElements[player] = nil
+    end
+end
+
+function ESP:BeginUpdateLoop()
+    coroutine.wrap(function()
+        while true do
+            self:Update()
+            wait(0.01)
+        end
+    end)()
+end
+
+function ESP:Update()
+    if not self:IsValidLocalPlayer() then return end
+
+    for player, elements in pairs(self.espElements) do
+        if self:IsValidPlayer(player) then
+            local headPosition, headOnScreen = self.camera:WorldToViewportPoint(player.Character.Head.Position)
+            if headOnScreen then
+                self:UpdateHeadCircle(elements.circle, headPosition, player)
+                self:UpdatePlayerInfo(elements.text, headPosition, player)
+                self:UpdateSkeleton(elements.lines, player)
+            else
+                self:HideAllElements(elements)
+            end
+        else
+            self:HideAllElements(elements)
+        end
+    end
+end
+
+function ESP:IsValidLocalPlayer()
+    return self.localPlayer.Character and self.localPlayer.Character:FindFirstChild("HumanoidRootPart")
+end
+
+function ESP:IsValidPlayer(player)
+    return player.Character and player.Character:FindFirstChild("Head") and 
+           player.Character:FindFirstChildOfClass("Humanoid") and 
+           player.Character:FindFirstChildOfClass("Humanoid").Health > 0
+end
+
+function ESP:UpdateHeadCircle(circle, headPosition, player)
+    local headSize = player.Character.Head.Size
+    local distance = (self.camera.CFrame.Position - player.Character.Head.Position).Magnitude
+    local scaleFactor = 1 / (distance / 10)
+    local headRadius = math.max(headSize.X, headSize.Y, headSize.Z) * scaleFactor / 2
+
+    circle.Radius = headRadius
+    circle.Position = Vector2.new(headPosition.X, headPosition.Y)
+    circle.Visible = true
+end
+
+function ESP:UpdatePlayerInfo(text, headPosition, player)
+    local distance = math.floor((self.localPlayer.Character.HumanoidRootPart.Position - player.Character.HumanoidRootPart.Position).Magnitude)
+    local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+
+    text.Text = string.format("%s\nHP: %.0f\nDist: %d", player.Name, humanoid.Health, distance)
+    text.Position = Vector2.new(headPosition.X, headPosition.Y - text.TextBounds.Y - 10)
+    text.Visible = true
+end
+
+function ESP:UpdateSkeleton(lines, player)
+    local connections = self:GetSkeletonConnections(player)
+    for _, connection in ipairs(connections) do
+        local startPart = player.Character:FindFirstChild(connection[1])
+        local endPart = player.Character:FindFirstChild(connection[2])
+        local line = lines[connection[1]]
+
+        if startPart and endPart and line then
+            self:DrawLine(startPart, endPart, line)
+        elseif line then
+            line.Visible = false
+        end
+    end
+end
+
+function ESP:GetSkeletonConnections(player)
+    local isR15 = player.Character:FindFirstChild("UpperTorso") ~= nil
+    return isR15 and self:GetR15Connections() or self:GetR6Connections()
+end
+
+function ESP:GetR15Connections()
+    return {
+        {"Head", "Neck"},
+        {"Neck", "UpperTorso"},
+        {"UpperTorso", "LowerTorso"},
+        {"LowerTorso", "LeftHip"},
+        {"LowerTorso", "RightHip"},
+        {"LeftHip", "LeftUpperLeg"},
+        {"LeftUpperLeg", "LeftLowerLeg"},
+        {"LeftLowerLeg", "LeftFoot"},
+        {"RightHip", "RightUpperLeg"},
+        {"RightUpperLeg", "RightLowerLeg"},
+        {"RightLowerLeg", "RightFoot"},
+        {"UpperTorso", "LeftShoulder"},
+        {"UpperTorso", "RightShoulder"},
+        {"LeftShoulder", "LeftUpperArm"},
+        {"LeftUpperArm", "LeftLowerArm"},
+        {"LeftLowerArm", "LeftHand"},
+        {"RightShoulder", "RightUpperArm"},
+        {"RightUpperArm", "RightLowerArm"},
+        {"RightLowerArm", "RightHand"}
+    }
+end
+
+function ESP:GetR6Connections()
+    return {
+        {"Head", "Torso"},
+        {"Torso", "Left Leg"},
+        {"Torso", "Right Leg"},
+        {"Left Leg", "Left Foot"},
+        {"Right Leg", "Right Foot"},
+        {"Torso", "Left Arm"},
+        {"Torso", "Right Arm"},
+        {"Left Arm", "Left Hand"},
+        {"Right Arm", "Right Hand"}
+    }
+end
+
+function ESP:DrawLine(startPart, endPart, line)
+    local startPos, startOnScreen = self.camera:WorldToViewportPoint(startPart.Position)
+    local endPos, endOnScreen = self.camera:WorldToViewportPoint(endPart.Position)
+    if startOnScreen and endOnScreen then
+        line.From = Vector2.new(startPos.X, startPos.Y)
+        line.To = Vector2.new(endPos.X, endPos.Y)
+        line.Visible = true
+    else
+        line.Visible = false
+    end
+end
+
+function ESP:HideAllElements(elements)
+    elements.circle.Visible = false
+    elements.text.Visible = false
+    for _, line in pairs(elements.lines) do
+        line.Visible = false
+    end
+end
+
+function ESP:Stop()
+    for _, connection in ipairs(self.connections) do
+        connection:Disconnect()
+    end
+    for player, _ in pairs(self.espElements) do
+        self:RemovePlayer(player)
+    end
+    for _, obj in ipairs(self.drawingObjects) do
+        obj:Remove()
+    end
+end
+
+-- Initialize ESP
+local esp = ESP.new()
+esp:Start()
+
+-- Create a simple GUI to toggle ESP
+local gui = _G.GuiLib.init(game.Players.LocalPlayer:WaitForChild("PlayerGui"))
+local toggle = _G.GuiLib.MenuToggle.create(gui, "ESP", true, function(state)
+    if state then
+        esp:Start()
+    else
+        esp:Stop()
+    end
+end)
+
+-- Clean up when the script is stopped
+game:BindToClose(function()
+    esp:Stop()
+    gui:Destroy()
+end)
