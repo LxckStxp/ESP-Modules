@@ -1,6 +1,6 @@
 -- ESPInterface.lua
 local Censura = loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/Censura/main/Censura.lua"))()
-local ESP = loadstring(game:HttpGet("YOUR_ESP_MODULE_URL"))()
+local ESP = loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/ESP-Modules/main/Censura Integration/ESP.lua"))()
 
 -- Create main window
 local window = Censura:CreateWindow("Advanced ESP")
