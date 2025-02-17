@@ -1,349 +1,274 @@
---[[
-    Advanced ESP System for Roblox
-    Compatible with CensuraDev UI Library
-    Optimized Version with Fixed Refresh Rate (144 FPS)
---]]
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 
--- Load CensuraDev UI Library
-local CensuraDev = loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/Censura/main/CensuraDev.lua"))()
+-- Load UI Library
+local CensuraDev = loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/Censura/main/Censura.lua"))()
 
---// Utility Functions
-local function GetDistanceFromCharacter(character)
-    if not character or not game.Players.LocalPlayer.Character then return math.huge end
-    return (character:GetPivot().Position - game.Players.LocalPlayer.Character:GetPivot().Position).Magnitude
-end
-
-local function IsAlive(player)
-    return player.Character and player.Character:FindFirstChild("Humanoid") 
-        and player.Character:FindFirstChild("Head") 
-        and player.Character.Humanoid.Health > 0
-end
-
---// ESP Configuration
-local ESPSettings = {
-    Enabled = false,
-    TeamCheck = false,
-    TeamColor = false,
-    ShowNames = true,
-    ShowHealth = true,
-    ShowDistance = true,
-    ShowTracers = false,
-    RainbowMode = false,
-    BaseColor = Color3.fromRGB(255, 0, 0),
-    BaseTransparency = 0.5, -- Fixed value
-    MaxDistance = 1000,
-    MinDistance = 0,
-    RefreshRate = 0.007, -- Fixed at ~144 FPS
-    FontSize = 14,
-    TracerOrigin = "Bottom",
-    TracerThickness = 1,
-    HiddenPlayerNames = {}
+-- ESP System
+local ESP = {
+    Settings = {
+        Enabled = false,
+        TeamCheck = false,
+        TeamColor = false,
+        ViewAngle = {
+            Enabled = false,
+            Threshold = 45,
+            Colors = {
+                Looking = Color3.fromRGB(255, 50, 50),
+                NotLooking = Color3.fromRGB(255, 255, 255)
+            }
+        },
+        Ranges = {
+            Close = {Range = 25, Scale = 1.2, Transparency = 0},
+            Medium = {Range = 100, Scale = 1, Transparency = 0.2},
+            Far = {Range = 300, Scale = 0.8, Transparency = 0.4}
+        },
+        Visual = {
+            MaxDistance = 1000,
+            FillTransparency = 0.5,
+            OutlineTransparency = 0.3,
+            TextSize = 14,
+            Colors = {
+                Enemy = Color3.fromRGB(255, 0, 0),
+                Team = Color3.fromRGB(0, 255, 0),
+                Outline = Color3.fromRGB(255, 255, 255)
+            }
+        }
+    },
+    
+    Cache = {
+        Components = {},
+        LocalPlayer = Players.LocalPlayer,
+        UpdateRate = 1/60,
+        LastUpdate = 0
+    }
 }
 
---// Storage Containers
-local ESPContainer = {
-    Highlights = {},
-    GUIs = {},
-    Tracers = {},
-    Connections = {}
-}
-
---// ESP Component Creation Functions
-local function UpdateNameVisibility(player, show)
-    if not player.Character then return end
-    local humanoid = player.Character:FindFirstChild("Humanoid")
-    if not humanoid then return end
-    
-    if show and ESPSettings.HiddenPlayerNames[player] == nil then
-        ESPSettings.HiddenPlayerNames[player] = humanoid.DisplayDistanceType
-    end
-    
-    humanoid.DisplayDistanceType = show and Enum.HumanoidDisplayDistanceType.None or 
-        (ESPSettings.HiddenPlayerNames[player] or Enum.HumanoidDisplayDistanceType.Viewer)
+-- Component Factory
+local function CreateHighlight()
+    local highlight = Instance.new("Highlight")
+    highlight.FillTransparency = ESP.Settings.Visual.FillTransparency
+    highlight.OutlineTransparency = ESP.Settings.Visual.OutlineTransparency
+    highlight.OutlineColor = ESP.Settings.Visual.Colors.Outline
+    return highlight
 end
 
-local function CreateESPGui(player)
+local function CreateInfoDisplay()
     local billboard = Instance.new("BillboardGui")
-    billboard.Name = "ESPGui"
-    billboard.Size = UDim2.new(0, 200, 0, 50)
-    billboard.StudsOffset = Vector3.new(0, 3, 0)
+    billboard.Name = "ESPInfo"
+    billboard.Size = UDim2.new(0, 200, 0, 40)
+    billboard.StudsOffset = Vector3.new(0, 2.5, 0)
     billboard.AlwaysOnTop = true
     billboard.LightInfluence = 0
     
-    local nameLabel = Instance.new("TextLabel")
-    nameLabel.Name = "NameLabel"
-    nameLabel.Size = UDim2.new(1, 0, 0.5, 0)
-    nameLabel.BackgroundTransparency = 1
-    nameLabel.TextColor3 = Color3.new(1, 1, 1)
-    nameLabel.TextStrokeTransparency = 0
-    nameLabel.TextSize = ESPSettings.FontSize
-    nameLabel.Font = Enum.Font.GothamBold
-    nameLabel.Parent = billboard
+    local container = Instance.new("Frame")
+    container.Name = "Container"
+    container.Size = UDim2.new(1, 0, 1, 0)
+    container.BackgroundTransparency = 1
+    container.Parent = billboard
     
     local infoLabel = Instance.new("TextLabel")
-    infoLabel.Name = "InfoLabel"
-    infoLabel.Size = UDim2.new(1, 0, 0.5, 0)
-    infoLabel.Position = UDim2.new(0, 0, 0.5, 0)
+    infoLabel.Name = "InfoText"
+    infoLabel.Size = UDim2.new(1, 0, 0.6, 0)
     infoLabel.BackgroundTransparency = 1
     infoLabel.TextColor3 = Color3.new(1, 1, 1)
     infoLabel.TextStrokeTransparency = 0
-    infoLabel.TextSize = ESPSettings.FontSize - 2
-    infoLabel.Font = Enum.Font.Gotham
-    infoLabel.Parent = billboard
+    infoLabel.TextSize = ESP.Settings.Visual.TextSize
+    infoLabel.Font = Enum.Font.GothamBold
+    infoLabel.Parent = container
+    
+    local healthBar = Instance.new("Frame")
+    healthBar.Name = "HealthBar"
+    healthBar.Size = UDim2.new(0.5, 0, 0.05, 0)
+    healthBar.Position = UDim2.new(0.25, 0, 0.7, 0)
+    healthBar.BackgroundColor3 = Color3.new(1, 1, 1)
+    healthBar.BorderSizePixel = 0
+    healthBar.Parent = container
+    
+    local healthCorner = Instance.new("UICorner")
+    healthCorner.CornerRadius = UDim.new(1, 0)
+    healthCorner.Parent = healthBar
     
     return billboard
 end
 
-local function CreateHighlight(player)
-    local highlight = Instance.new("Highlight")
-    highlight.FillColor = ESPSettings.TeamColor and player.TeamColor.Color or ESPSettings.BaseColor
-    highlight.OutlineColor = Color3.new(1, 1, 1)
-    highlight.FillTransparency = ESPSettings.BaseTransparency
-    highlight.OutlineTransparency = ESPSettings.BaseTransparency
-    return highlight
+-- ESP Functions
+function ESP:GetPlayerComponents(player)
+    if not self.Cache.Components[player] then
+        self.Cache.Components[player] = {
+            Highlight = CreateHighlight(),
+            InfoDisplay = CreateInfoDisplay()
+        }
+    end
+    return self.Cache.Components[player]
 end
 
-local function CreateTracer()
-    local line = Drawing.new("Line")
-    line.Thickness = ESPSettings.TracerThickness
-    line.Color = ESPSettings.BaseColor
-    line.Transparency = 1
-    line.Visible = false
-    return line
+function ESP:GetViewAngle(player)
+    local character = player.Character
+    if not character or not character:FindFirstChild("Head") then return false end
+    
+    local headCFrame = character.Head.CFrame
+    local lookVector = headCFrame.LookVector
+    local toLocal = (self.Cache.LocalPlayer.Character.Head.Position - character.Head.Position).Unit
+    local dot = lookVector:Dot(toLocal)
+    local angle = math.acos(dot) * (180/math.pi)
+    
+    return angle <= self.Settings.ViewAngle.Threshold
 end
 
-local function GetTracerOrigin()
-    local camera = workspace.CurrentCamera
-    local viewportSize = camera.ViewportSize
-    return Vector2.new(viewportSize.X / 2, viewportSize.Y)
+function ESP:GetDistanceSettings(distance)
+    local ranges = self.Settings.Ranges
+    if distance <= ranges.Close.Range then return ranges.Close
+    elseif distance <= ranges.Medium.Range then return ranges.Medium
+    else return ranges.Far end
 end
 
---// Main ESP Update Function
-local function UpdateESPComponent(player)
-    if not IsAlive(player) then return end
+function ESP:UpdatePlayer(player)
+    if player == self.Cache.LocalPlayer then return end
     
-    UpdateNameVisibility(player, ESPSettings.Enabled and ESPSettings.ShowNames)
-    
-    if not ESPContainer.Highlights[player] then
-        ESPContainer.Highlights[player] = CreateHighlight(player)
-    end
-    if not ESPContainer.GUIs[player] then
-        ESPContainer.GUIs[player] = CreateESPGui(player)
-    end
-    if not ESPContainer.Tracers[player] and ESPSettings.ShowTracers then
-        ESPContainer.Tracers[player] = CreateTracer()
+    local character = player.Character
+    if not character or not character:FindFirstChild("Humanoid") or
+       not character:FindFirstChild("HumanoidRootPart") then
+        return
     end
     
-    local highlight = ESPContainer.Highlights[player]
-    local gui = ESPContainer.GUIs[player]
-    local tracer = ESPContainer.Tracers[player]
+    local distance = (character:GetPivot().Position - self.Cache.LocalPlayer.Character:GetPivot().Position).Magnitude
+    if distance > self.Settings.Visual.MaxDistance then
+        self:HidePlayer(player)
+        return
+    end
     
-    highlight.Parent = player.Character
-    gui.Parent = player.Character.Head
+    if self.Settings.TeamCheck and player.Team == self.Cache.LocalPlayer.Team then
+        self:HidePlayer(player)
+        return
+    end
     
-    local distance = GetDistanceFromCharacter(player.Character)
+    local components = self:GetPlayerComponents(player)
+    local humanoid = character.Humanoid
     
-    if ESPSettings.RainbowMode then
-        highlight.FillColor = Color3.fromHSV((tick() % 5) / 5, 1, 1)
-    elseif ESPSettings.TeamColor then
-        highlight.FillColor = player.TeamColor.Color
+    -- Update Highlight
+    components.Highlight.Parent = character
+    if self.Settings.TeamColor then
+        components.Highlight.FillColor = player.TeamColor.Color
     else
-        highlight.FillColor = ESPSettings.BaseColor
+        components.Highlight.FillColor = self.Settings.Visual.Colors.Enemy
     end
     
-    local nameLabel = gui.NameLabel
-    local infoLabel = gui.InfoLabel
+    -- Update Info Display
+    local container = components.InfoDisplay.Container
+    local isLooking = self.Settings.ViewAngle.Enabled and self:GetViewAngle(player)
     
-    -- Updated name format
-    nameLabel.Text = ESPSettings.ShowNames and string.format("[%s]", player.Name) or ""
+    container.InfoText.Text = string.format("%s%s [%dm]",
+        isLooking and "!" or "",
+        player.Name,
+        math.floor(distance)
+    )
     
-    -- Updated info format
-    local infoText = ""
-    if ESPSettings.ShowHealth and player.Character:FindFirstChild("Humanoid") then
-        local health = math.floor(player.Character.Humanoid.Health)
-        local maxHealth = math.floor(player.Character.Humanoid.MaxHealth)
-        infoText = string.format("HP: %d/%d", health, maxHealth)
+    if self.Settings.ViewAngle.Enabled then
+        container.InfoText.TextColor3 = isLooking and 
+            self.Settings.ViewAngle.Colors.Looking or 
+            self.Settings.ViewAngle.Colors.NotLooking
     end
-    if ESPSettings.ShowDistance then
-        infoText = infoText ~= "" 
-            and string.format("%s | %dm", infoText, math.floor(distance))
-            or string.format("%dm", math.floor(distance))
-    end
-    infoLabel.Text = infoText
     
-    if ESPSettings.ShowTracers and tracer then
-        local character = player.Character
-        if character and character:FindFirstChild("HumanoidRootPart") then
-            local rootPart = character.HumanoidRootPart
-            local rootPos = rootPart.Position
-            local screenPos, onScreen = workspace.CurrentCamera:WorldToViewportPoint(rootPos)
-            
-            if onScreen then
-                tracer.Visible = true
-                tracer.From = GetTracerOrigin()
-                tracer.To = Vector2.new(screenPos.X, screenPos.Y)
-                tracer.Color = highlight.FillColor
-                tracer.Transparency = ESPSettings.BaseTransparency
-            else
-                tracer.Visible = false
-            end
-        end
-    end
+    -- Update Health Bar
+    local healthPercent = humanoid.Health / humanoid.MaxHealth
+    local healthBar = container.HealthBar
+    
+    TweenService:Create(healthBar, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+        Size = UDim2.new(0.5 * healthPercent, 0, 0.05, 0),
+        BackgroundColor3 = Color3.new(1 - healthPercent, healthPercent, 0)
+    }):Play()
+    
+    -- Apply Distance Effects
+    local distanceSettings = self:GetDistanceSettings(distance)
+    components.InfoDisplay.Size = UDim2.new(0, 200 * distanceSettings.Scale, 0, 40 * distanceSettings.Scale)
+    
+    TweenService:Create(container.InfoText, TweenInfo.new(0.3), {
+        TextTransparency = distanceSettings.Transparency,
+        TextStrokeTransparency = distanceSettings.Transparency
+    }):Play()
+    
+    components.InfoDisplay.Parent = character.Head
 end
 
---// Main ESP Update Loop
-local function UpdateESP()
-    while true do
-        if ESPSettings.Enabled then
-            for _, player in ipairs(game.Players:GetPlayers()) do
-                if player ~= game.Players.LocalPlayer then
-                    local shouldShow = true
-                    
-                    if ESPSettings.TeamCheck and player.Team == game.Players.LocalPlayer.Team then
-                        shouldShow = false
-                    end
-                    
-                    if IsAlive(player) then
-                        local distance = GetDistanceFromCharacter(player.Character)
-                        if distance > ESPSettings.MaxDistance then
-                            shouldShow = false
-                        end
-                    else
-                        shouldShow = false
-                    end
-                    
-                    if shouldShow then
-                        UpdateESPComponent(player)
-                    else
-                        if ESPContainer.Highlights[player] then
-                            ESPContainer.Highlights[player]:Destroy()
-                            ESPContainer.Highlights[player] = nil
-                        end
-                        if ESPContainer.GUIs[player] then
-                            ESPContainer.GUIs[player]:Destroy()
-                            ESPContainer.GUIs[player] = nil
-                        end
-                        if ESPContainer.Tracers[player] then
-                            ESPContainer.Tracers[player]:Remove()
-                            ESPContainer.Tracers[player] = nil
-                        end
-                    end
-                end
-            end
-        end
-        task.wait(ESPSettings.RefreshRate)
-    end
+function ESP:HidePlayer(player)
+    local components = self.Cache.Components[player]
+    if not components then return end
+    
+    components.Highlight.Parent = nil
+    components.InfoDisplay.Parent = nil
 end
 
---// UI Setup
-local ui = CensuraDev.new()
+function ESP:CleanupPlayer(player)
+    local components = self.Cache.Components[player]
+    if not components then return end
+    
+    components.Highlight:Destroy()
+    components.InfoDisplay:Destroy()
+    self.Cache.Components[player] = nil
+end
 
-ui:CreateToggle("ESP Enabled", false, function(value)
-    ESPSettings.Enabled = value
-    if not value then
-        for player, _ in pairs(ESPSettings.HiddenPlayerNames) do
-            if player and player.Character then
-                UpdateNameVisibility(player, false)
+-- Initialize ESP System
+function ESP:Initialize()
+    local ui = CensuraDev.new()
+    
+    ui:CreateToggle("ESP Enabled", false, function(value)
+        self.Settings.Enabled = value
+        if not value then
+            for player, _ in pairs(self.Cache.Components) do
+                self:HidePlayer(player)
             end
         end
-        ESPSettings.HiddenPlayerNames = {}
+    end)
+    
+    ui:CreateToggle("Team Check", false, function(value)
+        self.Settings.TeamCheck = value
+    end)
+    
+    ui:CreateToggle("Team Colors", false, function(value)
+        self.Settings.TeamColor = value
+    end)
+    
+    ui:CreateToggle("View Angle Indicator", false, function(value)
+        self.Settings.ViewAngle.Enabled = value
+    end)
+    
+    ui:CreateSlider("Max Distance", 100, 2000, 1000, function(value)
+        self.Settings.Visual.MaxDistance = value
+    end)
+    
+    -- Initialize existing players
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= self.Cache.LocalPlayer then
+            self:GetPlayerComponents(player)
+        end
+    end
+    
+    -- Player handling
+    Players.PlayerAdded:Connect(function(player)
+        if player ~= self.Cache.LocalPlayer then
+            self:GetPlayerComponents(player)
+        end
+    end)
+    
+    Players.PlayerRemoving:Connect(function(player)
+        self:CleanupPlayer(player)
+    end)
+    
+    -- Update loop
+    RunService.Heartbeat:Connect(function()
+        if not self.Settings.Enabled then return end
         
-        for player, highlight in pairs(ESPContainer.Highlights) do
-            highlight:Destroy()
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= self.Cache.LocalPlayer then
+                self:UpdatePlayer(player)
+            end
         end
-        for player, gui in pairs(ESPContainer.GUIs) do
-            gui:Destroy()
-        end
-        for player, tracer in pairs(ESPContainer.Tracers) do
-            tracer:Remove()
-        end
-        table.clear(ESPContainer.Highlights)
-        table.clear(ESPContainer.GUIs)
-        table.clear(ESPContainer.Tracers)
-    end
-end)
-
-ui:CreateToggle("Team Check", false, function(value)
-    ESPSettings.TeamCheck = value
-end)
-
-ui:CreateToggle("Team Colors", false, function(value)
-    ESPSettings.TeamColor = value
-end)
-
-ui:CreateToggle("Show Names", true, function(value)
-    ESPSettings.ShowNames = value
-end)
-
-ui:CreateToggle("Show Health", true, function(value)
-    ESPSettings.ShowHealth = value
-end)
-
-ui:CreateToggle("Show Distance", true, function(value)
-    ESPSettings.ShowDistance = value
-end)
-
-ui:CreateToggle("Show Tracers", false, function(value)
-    ESPSettings.ShowTracers = value
-    if not value then
-        for player, tracer in pairs(ESPContainer.Tracers) do
-            tracer:Remove()
-        end
-        table.clear(ESPContainer.Tracers)
-    end
-end)
-
-ui:CreateToggle("Rainbow Mode", false, function(value)
-    ESPSettings.RainbowMode = value
-end)
-
-ui:CreateSlider("Max Distance", 100, 2000, 1000, function(value)
-    ESPSettings.MaxDistance = value
-end)
-
---// Player Handling
-local function InitializePlayer(player)
-    if player == game.Players.LocalPlayer then return end
+    end)
     
-    local function CharacterAdded(character)
-        if ESPSettings.Enabled then
-            UpdateNameVisibility(player, ESPSettings.ShowNames)
-            UpdateESPComponent(player)
-        end
-    end
-    
-    player.CharacterAdded:Connect(CharacterAdded)
-    if player.Character then
-        CharacterAdded(player.Character)
-    end
+    ui:Show()
 end
 
-game.Players.PlayerAdded:Connect(InitializePlayer)
-game.Players.PlayerRemoving:Connect(function(player)
-    UpdateNameVisibility(player, false)
-    ESPSettings.HiddenPlayerNames[player] = nil
-    
-    if ESPContainer.Highlights[player] then
-        ESPContainer.Highlights[player]:Destroy()
-        ESPContainer.Highlights[player] = nil
-    end
-    if ESPContainer.GUIs[player] then
-        ESPContainer.GUIs[player]:Destroy()
-        ESPContainer.GUIs[player] = nil
-    end
-    if ESPContainer.Tracers[player] then
-        ESPContainer.Tracers[player]:Remove()
-        ESPContainer.Tracers[player] = nil
-    end
-end)
-
---// Initialize existing players
-for _, player in ipairs(game.Players:GetPlayers()) do
-    InitializePlayer(player)
-end
-
---// Start ESP Update Loop
-task.spawn(UpdateESP)
-
---// Show UI
-ui:Show()
+ESP:Initialize()
