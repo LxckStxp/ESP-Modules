@@ -1,6 +1,6 @@
 ------------------------------------------------------------
 -- Advanced ESP System – Revised (No Team Check / Team Colors)
--- Version: 5.3
+-- Version: 5.3 (Using new LSCommons methods for NPC targeting)
 -- Dependencies: LSCommons, NamePlates, CensuraDev (UI)
 ------------------------------------------------------------
 
@@ -44,7 +44,7 @@ function ESPObject.new(target, isNPC)
     self.Target = target
     self.IsNPC = isNPC
 
-    -- Create a Highlight instance for outlining the character.
+    -- Create a Highlight instance for outlining.
     self.Highlight = Instance.new("Highlight")
     self.Highlight.FillTransparency = 0.5
     self.Highlight.OutlineTransparency = 0.3
@@ -63,7 +63,8 @@ end
 
 -- Update the ESP object visuals every frame.
 function ESPObject:Update()
-    local character = (self.IsNPC and self.Target) or self.Target.Character
+    -- Retrieve the character using LSCommons so that both players and NPCs work
+    local character = LSCommons.Players.getCharacterFromEntity(self.Target)
     if not character or not LSCommons.Players.isAlive(character) then
         self:Hide()
         return
@@ -75,17 +76,21 @@ function ESPObject:Update()
         return
     end
 
-    -- Determine the display name
+    -- Determine the display name.
     local dispName = ""
     if self.IsNPC then
-        local humanoid = character:FindFirstChild("Humanoid")
-        dispName = (humanoid and humanoid.DisplayName and humanoid.DisplayName ~= "" and humanoid.DisplayName) or character.Name
+        -- Use LSCommons.Players.getHumanoidFromEntity to retrieve the humanoid for this NPC.
+        local humanoid = LSCommons.Players.getHumanoidFromEntity(self.Target)
+        if humanoid and humanoid.DisplayName and humanoid.DisplayName ~= "" then
+            dispName = humanoid.DisplayName
+        else
+            dispName = character.Name
+        end
     else
         dispName = self.Target.Name
     end
 
-    -- Determine color: if Rainbow Mode is on, use rainbow color,
-    -- for NPCs use the NPC color, otherwise use the default player color.
+    -- Determine the color:
     local color
     if ESPConfig.RainbowMode then
         color = LSCommons.Visual.getRainbowColor()
@@ -99,7 +104,7 @@ function ESPObject:Update()
     self.Highlight.Parent = character
     self.Highlight.FillColor = color
 
-    -- Update and show the nameplate with the given data.
+    -- Update and show the nameplate with the provided data.
     self.NamePlate:Show()
     local health, maxHealth = LSCommons.Players.getHealthInfo(character)
     self.NamePlate:Update({
@@ -110,7 +115,7 @@ function ESPObject:Update()
         color = color
     })
 
-    -- Parent the nameplate to the Head for proper positioning, if available.
+    -- Attach the nameplate to the character's Head (if available).
     if character:FindFirstChild("Head") then
         self.NamePlate:SetParent(character.Head)
     else
@@ -158,6 +163,30 @@ function ESPManager:UpdateAll()
     end
 end
 
+-- Helper function: checks if this NPC model is valid.
+function IsValidNPC(model)
+    local humanoid = model:FindFirstChild("Humanoid")
+    return humanoid and humanoid.Health > 0 and model:FindFirstChild("Head") and model:FindFirstChild("HumanoidRootPart")
+end
+
+-- Periodically scan the workspace for NPCs by traversing all descendants.
+local function ScanForNPCs()
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("Humanoid") then
+            local model = obj.Parent
+            if model and model:FindFirstChild("Head") and model:FindFirstChild("HumanoidRootPart") then
+                -- Only add if it is not associated with a player and passes the validity check.
+                if not Players:GetPlayerFromCharacter(model) and IsValidNPC(model) then
+                    if not ESPManager.Objects[model] then
+                        ESPManager:Add(model, true)
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Toggle the ESP system.
 function ESPManager:Toggle(enabled)
     ESPConfig.Enabled = enabled
 
@@ -177,51 +206,42 @@ function ESPManager:Toggle(enabled)
         return
     end
 
-    -- Setup: Add existing players (skipping the local player)
+    -- Setup: add all current players (excluding the local player)
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
             ESPManager:Add(player, false)
         end
     end
 
-    -- Listen for new players.
+    -- Listen for new players joining.
     self.Connections.PlayerAdded = Players.PlayerAdded:Connect(function(player)
         if player ~= LocalPlayer then
             ESPManager:Add(player, false)
         end
     end)
-
     self.Connections.PlayerRemoving = Players.PlayerRemoving:Connect(function(player)
         ESPManager:Remove(player)
     end)
 
     -- NPC handling.
     if ESPConfig.ShowNPCs then
-        for _, obj in ipairs(workspace:GetChildren()) do
-            if LSCommons.Players.isNPC(obj) then
-                ESPManager:Add(obj, true)
+        -- Instead of relying solely on ChildAdded/Removed events, periodically scan the workspace every 60 seconds.
+        spawn(function()
+            while ESPConfig.Enabled and ESPConfig.ShowNPCs do
+                ScanForNPCs()
+                wait(60)  -- scan every 60 seconds to reduce lag
             end
-        end
-
-        self.Connections.NPCAdded = workspace.ChildAdded:Connect(function(child)
-            if LSCommons.Players.isNPC(child) then
-                ESPManager:Add(child, true)
-            end
-        end)
-
-        self.Connections.NPCRemoved = workspace.ChildRemoved:Connect(function(child)
-            ESPManager:Remove(child)
         end)
     end
 
-    -- Update loop.
+    -- Update loop; run every RenderStepped.
     self.Connection = RunService.RenderStepped:Connect(function()
         ESPManager:UpdateAll()
     end)
 end
 
 ------------------------------------------------------------
--- UI Setup
+-- UI Setup using CensuraDev
 ------------------------------------------------------------
 local Window = UI.new("ESP")
 
