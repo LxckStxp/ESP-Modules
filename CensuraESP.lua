@@ -1,274 +1,284 @@
+------------------------------------------------------------
+-- Advanced ESP System – Revised (No Team Check / Team Colors)
+-- Version: 5.3
+-- Dependencies: LSCommons, NamePlates, CensuraDev (UI)
+------------------------------------------------------------
+
+-- Dependencies (ensure these URLs are valid)
+local LSCommons = loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/LSCommons/main/LSCommons.lua"))()
+local NamePlates = loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/LSCommons/main/NamePlates.lua"))()
+local UI = loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/Censura/main/CensuraDev.lua"))()
+
 -- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
+local LocalPlayer = Players.LocalPlayer
 
--- Load UI Library
-local CensuraDev = loadstring(game:HttpGet("https://raw.githubusercontent.com/LxckStxp/Censura/main/Censura.lua"))()
-
--- ESP System
-local ESP = {
-    Settings = {
-        Enabled = false,
-        TeamCheck = false,
-        TeamColor = false,
-        ViewAngle = {
-            Enabled = false,
-            Threshold = 45,
-            Colors = {
-                Looking = Color3.fromRGB(255, 50, 50),
-                NotLooking = Color3.fromRGB(255, 255, 255)
-            }
-        },
-        Ranges = {
-            Close = {Range = 25, Scale = 1.2, Transparency = 0},
-            Medium = {Range = 100, Scale = 1, Transparency = 0.2},
-            Far = {Range = 300, Scale = 0.8, Transparency = 0.4}
-        },
-        Visual = {
-            MaxDistance = 1000,
-            FillTransparency = 0.5,
-            OutlineTransparency = 0.3,
-            TextSize = 14,
-            Colors = {
-                Enemy = Color3.fromRGB(255, 0, 0),
-                Team = Color3.fromRGB(0, 255, 0),
-                Outline = Color3.fromRGB(255, 255, 255)
-            }
-        }
-    },
-    
-    Cache = {
-        Components = {},
-        LocalPlayer = Players.LocalPlayer,
-        UpdateRate = 1/60,
-        LastUpdate = 0
+------------------------------------------------------------
+-- ESP Configuration (Team-related options removed)
+------------------------------------------------------------
+local ESPConfig = {
+    Enabled = false,
+    ShowNames = true,
+    ShowHealth = true,
+    ShowDistance = true,
+    ShowNPCs = true,
+    RainbowMode = false,
+    MaxDistance = 1000,
+    Colors = {
+        Player = Color3.fromRGB(255, 0, 0),    -- Default enemy/player color (red)
+        NPC = Color3.fromRGB(255, 128, 0),       -- NPC color (orange)
+        Outline = Color3.fromRGB(255, 255, 255)  -- Outline color (white)
     }
 }
 
--- Component Factory
-local function CreateHighlight()
-    local highlight = Instance.new("Highlight")
-    highlight.FillTransparency = ESP.Settings.Visual.FillTransparency
-    highlight.OutlineTransparency = ESP.Settings.Visual.OutlineTransparency
-    highlight.OutlineColor = ESP.Settings.Visual.Colors.Outline
-    return highlight
+------------------------------------------------------------
+-- ESP Object Class
+------------------------------------------------------------
+local ESPObject = {}
+ESPObject.__index = ESPObject
+
+-- Construct a new ESP object for a given target (player or NPC)
+function ESPObject.new(target, isNPC)
+    local self = setmetatable({}, ESPObject)
+    self.Target = target
+    self.IsNPC = isNPC
+
+    -- Create a Highlight instance for outlining the character.
+    self.Highlight = Instance.new("Highlight")
+    self.Highlight.FillTransparency = 0.5
+    self.Highlight.OutlineTransparency = 0.3
+    self.Highlight.OutlineColor = ESPConfig.Colors.Outline
+
+    -- Create a NamePlate using the NamePlates module.
+    self.NamePlate = NamePlates.new({
+        showName = ESPConfig.ShowNames,
+        showHealth = ESPConfig.ShowHealth,
+        showDistance = ESPConfig.ShowDistance,
+        maxDistance = ESPConfig.MaxDistance
+    })
+
+    return self
 end
 
-local function CreateInfoDisplay()
-    local billboard = Instance.new("BillboardGui")
-    billboard.Name = "ESPInfo"
-    billboard.Size = UDim2.new(0, 200, 0, 40)
-    billboard.StudsOffset = Vector3.new(0, 2.5, 0)
-    billboard.AlwaysOnTop = true
-    billboard.LightInfluence = 0
-    
-    local container = Instance.new("Frame")
-    container.Name = "Container"
-    container.Size = UDim2.new(1, 0, 1, 0)
-    container.BackgroundTransparency = 1
-    container.Parent = billboard
-    
-    local infoLabel = Instance.new("TextLabel")
-    infoLabel.Name = "InfoText"
-    infoLabel.Size = UDim2.new(1, 0, 0.6, 0)
-    infoLabel.BackgroundTransparency = 1
-    infoLabel.TextColor3 = Color3.new(1, 1, 1)
-    infoLabel.TextStrokeTransparency = 0
-    infoLabel.TextSize = ESP.Settings.Visual.TextSize
-    infoLabel.Font = Enum.Font.GothamBold
-    infoLabel.Parent = container
-    
-    local healthBar = Instance.new("Frame")
-    healthBar.Name = "HealthBar"
-    healthBar.Size = UDim2.new(0.5, 0, 0.05, 0)
-    healthBar.Position = UDim2.new(0.25, 0, 0.7, 0)
-    healthBar.BackgroundColor3 = Color3.new(1, 1, 1)
-    healthBar.BorderSizePixel = 0
-    healthBar.Parent = container
-    
-    local healthCorner = Instance.new("UICorner")
-    healthCorner.CornerRadius = UDim.new(1, 0)
-    healthCorner.Parent = healthBar
-    
-    return billboard
-end
-
--- ESP Functions
-function ESP:GetPlayerComponents(player)
-    if not self.Cache.Components[player] then
-        self.Cache.Components[player] = {
-            Highlight = CreateHighlight(),
-            InfoDisplay = CreateInfoDisplay()
-        }
-    end
-    return self.Cache.Components[player]
-end
-
-function ESP:GetViewAngle(player)
-    local character = player.Character
-    if not character or not character:FindFirstChild("Head") then return false end
-    
-    local headCFrame = character.Head.CFrame
-    local lookVector = headCFrame.LookVector
-    local toLocal = (self.Cache.LocalPlayer.Character.Head.Position - character.Head.Position).Unit
-    local dot = lookVector:Dot(toLocal)
-    local angle = math.acos(dot) * (180/math.pi)
-    
-    return angle <= self.Settings.ViewAngle.Threshold
-end
-
-function ESP:GetDistanceSettings(distance)
-    local ranges = self.Settings.Ranges
-    if distance <= ranges.Close.Range then return ranges.Close
-    elseif distance <= ranges.Medium.Range then return ranges.Medium
-    else return ranges.Far end
-end
-
-function ESP:UpdatePlayer(player)
-    if player == self.Cache.LocalPlayer then return end
-    
-    local character = player.Character
-    if not character or not character:FindFirstChild("Humanoid") or
-       not character:FindFirstChild("HumanoidRootPart") then
+-- Update the ESP object visuals every frame.
+function ESPObject:Update()
+    local character = (self.IsNPC and self.Target) or self.Target.Character
+    if not character or not LSCommons.Players.isAlive(character) then
+        self:Hide()
         return
     end
-    
-    local distance = (character:GetPivot().Position - self.Cache.LocalPlayer.Character:GetPivot().Position).Magnitude
-    if distance > self.Settings.Visual.MaxDistance then
-        self:HidePlayer(player)
+
+    local distance = LSCommons.Math.getDistanceFromPlayer(character:GetPivot().Position)
+    if distance > ESPConfig.MaxDistance then
+        self:Hide()
         return
     end
-    
-    if self.Settings.TeamCheck and player.Team == self.Cache.LocalPlayer.Team then
-        self:HidePlayer(player)
-        return
-    end
-    
-    local components = self:GetPlayerComponents(player)
-    local humanoid = character.Humanoid
-    
-    -- Update Highlight
-    components.Highlight.Parent = character
-    if self.Settings.TeamColor then
-        components.Highlight.FillColor = player.TeamColor.Color
+
+    -- Determine the display name
+    local dispName = ""
+    if self.IsNPC then
+        local humanoid = character:FindFirstChild("Humanoid")
+        dispName = (humanoid and humanoid.DisplayName and humanoid.DisplayName ~= "" and humanoid.DisplayName) or character.Name
     else
-        components.Highlight.FillColor = self.Settings.Visual.Colors.Enemy
+        dispName = self.Target.Name
     end
-    
-    -- Update Info Display
-    local container = components.InfoDisplay.Container
-    local isLooking = self.Settings.ViewAngle.Enabled and self:GetViewAngle(player)
-    
-    container.InfoText.Text = string.format("%s%s [%dm]",
-        isLooking and "!" or "",
-        player.Name,
-        math.floor(distance)
-    )
-    
-    if self.Settings.ViewAngle.Enabled then
-        container.InfoText.TextColor3 = isLooking and 
-            self.Settings.ViewAngle.Colors.Looking or 
-            self.Settings.ViewAngle.Colors.NotLooking
+
+    -- Determine color: if Rainbow Mode is on, use rainbow color,
+    -- for NPCs use the NPC color, otherwise use the default player color.
+    local color
+    if ESPConfig.RainbowMode then
+        color = LSCommons.Visual.getRainbowColor()
+    elseif self.IsNPC then
+        color = ESPConfig.Colors.NPC
+    else
+        color = ESPConfig.Colors.Player
     end
-    
-    -- Update Health Bar
-    local healthPercent = humanoid.Health / humanoid.MaxHealth
-    local healthBar = container.HealthBar
-    
-    TweenService:Create(healthBar, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
-        Size = UDim2.new(0.5 * healthPercent, 0, 0.05, 0),
-        BackgroundColor3 = Color3.new(1 - healthPercent, healthPercent, 0)
-    }):Play()
-    
-    -- Apply Distance Effects
-    local distanceSettings = self:GetDistanceSettings(distance)
-    components.InfoDisplay.Size = UDim2.new(0, 200 * distanceSettings.Scale, 0, 40 * distanceSettings.Scale)
-    
-    TweenService:Create(container.InfoText, TweenInfo.new(0.3), {
-        TextTransparency = distanceSettings.Transparency,
-        TextStrokeTransparency = distanceSettings.Transparency
-    }):Play()
-    
-    components.InfoDisplay.Parent = character.Head
+
+    -- Apply the highlight and update its fill color.
+    self.Highlight.Parent = character
+    self.Highlight.FillColor = color
+
+    -- Update and show the nameplate with the given data.
+    self.NamePlate:Show()
+    local health, maxHealth = LSCommons.Players.getHealthInfo(character)
+    self.NamePlate:Update({
+        name = dispName,
+        health = health,
+        maxHealth = maxHealth,
+        distance = distance,
+        color = color
+    })
+
+    -- Parent the nameplate to the Head for proper positioning, if available.
+    if character:FindFirstChild("Head") then
+        self.NamePlate:SetParent(character.Head)
+    else
+        self.NamePlate:SetParent(character)
+    end
 end
 
-function ESP:HidePlayer(player)
-    local components = self.Cache.Components[player]
-    if not components then return end
-    
-    components.Highlight.Parent = nil
-    components.InfoDisplay.Parent = nil
+function ESPObject:Hide()
+    self.Highlight.Parent = nil
+    self.NamePlate:Hide()
 end
 
-function ESP:CleanupPlayer(player)
-    local components = self.Cache.Components[player]
-    if not components then return end
-    
-    components.Highlight:Destroy()
-    components.InfoDisplay:Destroy()
-    self.Cache.Components[player] = nil
+function ESPObject:Destroy()
+    self.Highlight:Destroy()
+    self.NamePlate:Destroy()
 end
 
--- Initialize ESP System
-function ESP:Initialize()
-    local ui = CensuraDev.new()
-    
-    ui:CreateToggle("ESP Enabled", false, function(value)
-        self.Settings.Enabled = value
-        if not value then
-            for player, _ in pairs(self.Cache.Components) do
-                self:HidePlayer(player)
-            end
+------------------------------------------------------------
+-- ESP Manager
+------------------------------------------------------------
+local ESPManager = {
+    Objects = {},
+    Connection = nil,
+    Connections = {}  -- For event cleanup
+}
+
+function ESPManager:Add(target, isNPC)
+    if ESPManager.Objects[target] then return end
+    ESPManager.Objects[target] = ESPObject.new(target, isNPC)
+end
+
+function ESPManager:Remove(target)
+    if not ESPManager.Objects[target] then return end
+    ESPManager.Objects[target]:Destroy()
+    ESPManager.Objects[target] = nil
+end
+
+function ESPManager:UpdateAll()
+    for target, espObj in pairs(self.Objects) do
+        if not target.Parent then
+            self:Remove(target)
+        else
+            espObj:Update()
         end
-    end)
-    
-    ui:CreateToggle("Team Check", false, function(value)
-        self.Settings.TeamCheck = value
-    end)
-    
-    ui:CreateToggle("Team Colors", false, function(value)
-        self.Settings.TeamColor = value
-    end)
-    
-    ui:CreateToggle("View Angle Indicator", false, function(value)
-        self.Settings.ViewAngle.Enabled = value
-    end)
-    
-    ui:CreateSlider("Max Distance", 100, 2000, 1000, function(value)
-        self.Settings.Visual.MaxDistance = value
-    end)
-    
-    -- Initialize existing players
+    end
+end
+
+function ESPManager:Toggle(enabled)
+    ESPConfig.Enabled = enabled
+
+    for _, conn in pairs(self.Connections) do
+        conn:Disconnect()
+    end
+    self.Connections = {}
+
+    if not enabled then
+        for target in pairs(self.Objects) do
+            self:Remove(target)
+        end
+        if self.Connection then
+            self.Connection:Disconnect()
+            self.Connection = nil
+        end
+        return
+    end
+
+    -- Setup: Add existing players (skipping the local player)
     for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= self.Cache.LocalPlayer then
-            self:GetPlayerComponents(player)
+        if player ~= LocalPlayer then
+            ESPManager:Add(player, false)
         end
     end
-    
-    -- Player handling
-    Players.PlayerAdded:Connect(function(player)
-        if player ~= self.Cache.LocalPlayer then
-            self:GetPlayerComponents(player)
+
+    -- Listen for new players.
+    self.Connections.PlayerAdded = Players.PlayerAdded:Connect(function(player)
+        if player ~= LocalPlayer then
+            ESPManager:Add(player, false)
         end
     end)
-    
-    Players.PlayerRemoving:Connect(function(player)
-        self:CleanupPlayer(player)
+
+    self.Connections.PlayerRemoving = Players.PlayerRemoving:Connect(function(player)
+        ESPManager:Remove(player)
     end)
-    
-    -- Update loop
-    RunService.Heartbeat:Connect(function()
-        if not self.Settings.Enabled then return end
-        
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= self.Cache.LocalPlayer then
-                self:UpdatePlayer(player)
+
+    -- NPC handling.
+    if ESPConfig.ShowNPCs then
+        for _, obj in ipairs(workspace:GetChildren()) do
+            if LSCommons.Players.isNPC(obj) then
+                ESPManager:Add(obj, true)
             end
         end
+
+        self.Connections.NPCAdded = workspace.ChildAdded:Connect(function(child)
+            if LSCommons.Players.isNPC(child) then
+                ESPManager:Add(child, true)
+            end
+        end)
+
+        self.Connections.NPCRemoved = workspace.ChildRemoved:Connect(function(child)
+            ESPManager:Remove(child)
+        end)
+    end
+
+    -- Update loop.
+    self.Connection = RunService.RenderStepped:Connect(function()
+        ESPManager:UpdateAll()
     end)
-    
-    ui:Show()
 end
 
-ESP:Initialize()
+------------------------------------------------------------
+-- UI Setup
+------------------------------------------------------------
+local Window = UI.new("ESP")
+
+Window:CreateToggle("ESP Enabled", ESPConfig.Enabled, function(value)
+    ESPManager:Toggle(value)
+end)
+
+Window:CreateToggle("Show NPCs", ESPConfig.ShowNPCs, function(value)
+    ESPConfig.ShowNPCs = value
+    if ESPConfig.Enabled then
+        ESPManager:Toggle(false)
+        ESPManager:Toggle(true)
+    end
+end)
+
+Window:CreateToggle("Show Names", ESPConfig.ShowNames, function(value)
+    ESPConfig.ShowNames = value
+    for _, espObj in pairs(ESPManager.Objects) do
+        if espObj.NamePlate and espObj.NamePlate.config then
+            espObj.NamePlate.config.showName = value
+        end
+    end
+end)
+
+Window:CreateToggle("Show Health", ESPConfig.ShowHealth, function(value)
+    ESPConfig.ShowHealth = value
+    for _, espObj in pairs(ESPManager.Objects) do
+        if espObj.NamePlate and espObj.NamePlate.config then
+            espObj.NamePlate.config.showHealth = value
+        end
+    end
+end)
+
+Window:CreateToggle("Show Distance", ESPConfig.ShowDistance, function(value)
+    ESPConfig.ShowDistance = value
+    for _, espObj in pairs(ESPManager.Objects) do
+        if espObj.NamePlate and espObj.NamePlate.config then
+            espObj.NamePlate.config.showDistance = value
+        end
+    end
+end)
+
+Window:CreateToggle("Rainbow Mode", ESPConfig.RainbowMode, function(value)
+    ESPConfig.RainbowMode = value
+end)
+
+Window:CreateSlider("Max Distance", 100, 2000, ESPConfig.MaxDistance, function(value)
+    ESPConfig.MaxDistance = value
+    for _, espObj in pairs(ESPManager.Objects) do
+        if espObj.NamePlate and espObj.NamePlate.config then
+            espObj.NamePlate.config.maxDistance = value
+        end
+    end
+end)
+
+Window:Show()
+
+------------------------------------------------------------
+-- End of Revised ESP Script
+------------------------------------------------------------
