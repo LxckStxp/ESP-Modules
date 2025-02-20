@@ -245,11 +245,14 @@ end
 ------------------------------------------------------------
 local Window = UI.new("ESP")
 
-Window:CreateToggle("ESP Enabled", ESPConfig.Enabled, function(value)
+-- ESP Enable Toggle
+Window:CreateToggle("ESP Enabled", false, function(value)
+    ESPConfig.Enabled = value
     ESPManager:Toggle(value)
 end)
 
-Window:CreateToggle("Show NPCs", ESPConfig.ShowNPCs, function(value)
+-- Show NPCs Toggle
+Window:CreateToggle("Show NPCs", false, function(value)
     ESPConfig.ShowNPCs = value
     if ESPConfig.Enabled then
         ESPManager:Toggle(false)
@@ -257,7 +260,8 @@ Window:CreateToggle("Show NPCs", ESPConfig.ShowNPCs, function(value)
     end
 end)
 
-Window:CreateToggle("Show Names", ESPConfig.ShowNames, function(value)
+-- Show Names Toggle
+Window:CreateToggle("Show Names", true, function(value)
     ESPConfig.ShowNames = value
     for _, espObj in pairs(ESPManager.Objects) do
         if espObj.NamePlate and espObj.NamePlate.config then
@@ -266,7 +270,8 @@ Window:CreateToggle("Show Names", ESPConfig.ShowNames, function(value)
     end
 end)
 
-Window:CreateToggle("Show Health", ESPConfig.ShowHealth, function(value)
+-- Show Health Toggle
+Window:CreateToggle("Show Health", true, function(value)
     ESPConfig.ShowHealth = value
     for _, espObj in pairs(ESPManager.Objects) do
         if espObj.NamePlate and espObj.NamePlate.config then
@@ -275,7 +280,8 @@ Window:CreateToggle("Show Health", ESPConfig.ShowHealth, function(value)
     end
 end)
 
-Window:CreateToggle("Show Distance", ESPConfig.ShowDistance, function(value)
+-- Show Distance Toggle
+Window:CreateToggle("Show Distance", true, function(value)
     ESPConfig.ShowDistance = value
     for _, espObj in pairs(ESPManager.Objects) do
         if espObj.NamePlate and espObj.NamePlate.config then
@@ -284,11 +290,13 @@ Window:CreateToggle("Show Distance", ESPConfig.ShowDistance, function(value)
     end
 end)
 
-Window:CreateToggle("Rainbow Mode", ESPConfig.RainbowMode, function(value)
+-- Rainbow Mode Toggle
+Window:CreateToggle("Rainbow Mode", false, function(value)
     ESPConfig.RainbowMode = value
 end)
 
-Window:CreateSlider("Max Distance", 100, 2000, ESPConfig.MaxDistance, function(value)
+-- Max Distance Slider
+Window:CreateSlider("Max Distance", 100, 2000, 1000, function(value)
     ESPConfig.MaxDistance = value
     for _, espObj in pairs(ESPManager.Objects) do
         if espObj.NamePlate and espObj.NamePlate.config then
@@ -297,8 +305,5 @@ Window:CreateSlider("Max Distance", 100, 2000, ESPConfig.MaxDistance, function(v
     end
 end)
 
+-- Show the window
 Window:Show()
-
-------------------------------------------------------------
--- End of Revised ESP Script
-------------------------------------------------------------
